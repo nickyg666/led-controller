@@ -1002,7 +1002,16 @@ static void process_command(const char *cmd) {
         } else {
             printf("ERR: PWMRGB needs 3 or 4 values 0-255\n");
         }
-     } else if (strncmp(cmd, "WHITE", 5) == 0 && isspace((unsigned char)cmd[5])) {
+     } else if (strncmp(cmd, "COLOR", 5) == 0 && isspace((unsigned char)cmd[5])) {
+        int r, g, b;
+        if (sscanf(cmd + 5, "%d %d %d", &r, &g, &b) == 3 &&
+            r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+            cur_r = (uint8_t)r; cur_g = (uint8_t)g; cur_b = (uint8_t)b;
+            printf("OK COLOR=%d,%d,%d\n", r, g, b);
+        } else {
+            printf("ERR: COLOR needs 3 values 0-255\\n");
+        }
+    } else if (strncmp(cmd, "WHITE", 5) == 0 && isspace((unsigned char)cmd[5])) {
         int w;
         if (sscanf(cmd + 5, "%d", &w) == 1 && w >= 0 && w <= 255) {
             apply_white((uint8_t)w);
@@ -1163,7 +1172,8 @@ static void process_command(const char *cmd) {
         reset_usb_boot(0, 0);
     } else if (strcmp(cmd, "HELP") == 0) {
         printf("HELP Commands:\n");
-        printf("  RGB <r> <g> <b> [w]  Fill WS2811 + PWM (optional white)\n");
+        printf("  RGB <r> <g> <b> [w]  Fill WS2811 + PWM (optional white)\\n");
+        printf("  COLOR <r> <g> <b>    Set base color (updates running effect)\\n");
         printf("  PWMRGB <r> <g> <b> [w]  PWM strip only (optional white)\n");
         printf("  WHITE <w>            Set white LED (pin 14) 0-255\n");
         printf("  BRIGHTNESS <0-255>   Global brightness (dims effects too)\n");
