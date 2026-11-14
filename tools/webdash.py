@@ -367,10 +367,11 @@ select{cursor:pointer;min-width:120px}
     <button class="btn btn-sm btn-success" onclick="addFrame()">+ Add Frame</button>
     <button class="btn btn-sm btn-ghost" onclick="dupFrame()">Duplicate</button>
     <button class="btn btn-sm btn-danger" onclick="delFrame()">Delete Frame</button>
+    <button class="btn btn-sm btn-ghost" onclick="reverseFrames()">Reverse</button>
     <span class="label" style="margin-left:8px">Frame <span id="frameinfo">0/0</span></span>
   </div>
   <div class="anim-preview" id="animpreview"><div class="led-row" id="previewrow"></div></div>
-  <div class="anim-timeline" id="timeline"></div>
+  <div class="anim-timeline" id="timeline" ondragover="event.preventDefault()" ondrop="handleDrop(event)"></div>
   <div class="anim-controls">
     <button class="btn btn-sm btn-success" onclick="playAnim()">Play</button>
     <button class="btn btn-sm btn-danger" onclick="stopAnim()">Stop</button>
@@ -493,6 +494,7 @@ function renderAnimGrid(){
   document.onmouseup=()=>{isPainting=false;};
 }
 function paintLed(i){
+  if(animPlaying){stopAnim();toast('Stopped animation');}
   const bs=parseInt(document.getElementById('brushsize').value);
   for(let d=0;d<bs;d++){
     if(i+d<81){ledColors[i+d]=paintColor;document.querySelectorAll('#animgrid .led-cell')[i+d].style.background=paintColor;}
@@ -502,20 +504,20 @@ function paintLed(i){
   }
 }
 function fillFrame(){
+  if(animPlaying){stopAnim();toast('Stopped animation first');}
+  if(animFrames.length===0){toast('Add a frame first');return;}
   for(let i=0;i<81;i++){ledColors[i]=paintColor;}
   renderAnimGrid();
-  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
-    animFrames[currentFrame]=[...ledColors];
-  }
-  toast('Frame filled');
+  animFrames[currentFrame]=[...ledColors];
+  toast('Frame '+ (currentFrame+1) +' filled');
 }
 function clearFrame(){
+  if(animPlaying){stopAnim();toast('Stopped animation first');}
+  if(animFrames.length===0){toast('Add a frame first');return;}
   for(let i=0;i<81;i++){ledColors[i]='#000000';}
   renderAnimGrid();
-  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
-    animFrames[currentFrame]=[...ledColors];
-  }
-  toast('Frame cleared');
+  animFrames[currentFrame]=[...ledColors];
+  toast('Frame '+ (currentFrame+1) +' cleared');
 }
 function updateFrameInfo(){
   const el=document.getElementById('frameinfo');
@@ -533,6 +535,8 @@ function renderTimeline(){
   animFrames.forEach((f,i)=>{
     const div=document.createElement('div');
     div.className='anim-frame'+(i===currentFrame?' active':'');
+    div.draggable=true;
+    div.dataset.index=i;
     // render mini preview
     const canvas=document.createElement('canvas');
     canvas.width=60;canvas.height=60;
@@ -543,6 +547,11 @@ function renderTimeline(){
     const num=document.createElement('div');num.className='frame-num';num.textContent=i+1;div.appendChild(num);
     const del=document.createElement('div');del.className='frame-del';del.textContent='×';del.onclick=(e)=>{e.stopPropagation();delFrame(i);};div.appendChild(del);
     div.onclick=()=>{loadFrame(i);};
+    div.ondragstart=(e)=>{e.dataTransfer.setData('text/plain',i);div.style.opacity='0.4';};
+    div.ondragend=(e)=>{div.style.opacity='1';};
+    div.ondragover=(e)=>{e.preventDefault();div.style.border='2px solid var(--accent2)';};
+    div.ondragleave=(e)=>{div.style.border='';};
+    div.ondrop=(e)=>{e.preventDefault();e.stopPropagation();div.style.border='';const from=parseInt(e.dataTransfer.getData('text/plain'));if(from!==i){const item=animFrames.splice(from,1)[0];animFrames.splice(i,0,item);if(currentFrame===from)currentFrame=i;else if(from<currentFrame && i>=currentFrame)currentFrame--;else if(from>currentFrame && i<=currentFrame)currentFrame++;loadFrame(currentFrame);renderTimeline();renderPreview();toast('Frame moved');}};
     tl.appendChild(div);
   });
 }
@@ -594,6 +603,20 @@ function delFrame(idx){
   renderPreview();
   updateFrameInfo();
   toast('Frame deleted');
+}
+function reverseFrames(){
+  if(animFrames.length<2){toast('Need at least 2 frames');return;}
+  // Save current frame first
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  animFrames.reverse();
+  currentFrame=animFrames.length-1-currentFrame;
+  loadFrame(currentFrame);
+  renderTimeline();
+  renderPreview();
+  updateFrameInfo();
+  toast('Frames reversed');
 }
 function updateFrameDelay(){
   // store per-frame delay
