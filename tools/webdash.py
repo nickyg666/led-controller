@@ -274,6 +274,7 @@ select{cursor:pointer;min-width:120px}
   <button class="tab active" onclick="showTab('control',this)">Control</button>
   <button class="tab" onclick="showTab('sequence',this)">Sequences</button>
   <button class="tab" onclick="showTab('animation',this)">Animation Editor</button>
+  <button class="tab" onclick="showTab('layout',this)">Layout</button>
   <button class="tab" onclick="showTab('leds',this)">Per-LED</button>
   <button class="tab" onclick="showTab('effects',this)">Effects</button>
 </div>
@@ -395,6 +396,32 @@ select{cursor:pointer;min-width:120px}
 </div>
 </div>
 
+<!-- Layout Editor -->
+<div id="tab-layout" style="display:none">
+<div class="card">
+  <h2>Grid Layout Editor</h2>
+  <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Reconfigure the LED grid to match your physical strip layout (bends, curves, etc.). Click a cell to assign an LED index.</p>
+  <div class="row">
+    <span class="label">Rows</span>
+    <input type="number" id="layoutrows" value="9" min="1" max="20" style="width:60px">
+    <span class="label">Cols</span>
+    <input type="number" id="layoutcols" value="9" min="1" max="20" style="width:60px">
+    <button class="btn btn-sm" onclick="buildLayoutGrid()">Build Grid</button>
+    <button class="btn btn-sm btn-ghost" onclick="presetLinear()">Linear</button>
+    <button class="btn btn-sm btn-ghost" onclick="presetSerpentine()">Serpentine</button>
+    <button class="btn btn-sm btn-success" onclick="saveLayout()">Save Layout</button>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <span class="label">Paint index</span>
+    <input type="number" id="layoutidx" value="0" min="0" max="1023" style="width:70px">
+    <button class="btn btn-sm btn-ghost" onclick="autoFill()">Auto-fill sequential</button>
+    <button class="btn btn-sm btn-danger" onclick="clearLayout()">Clear</button>
+  </div>
+  <div id="layoutgrid" style="display:grid;gap:2px;margin:12px 0;overflow:auto;max-height:500px"></div>
+  <div class="status-bar" id="layoutstatus">No layout loaded. Build a grid to start.</div>
+</div>
+</div>
+
 <!-- Per-LED -->
 <div id="tab-leds" style="display:none">
 <div class="card">
@@ -512,8 +539,9 @@ function fillFrame(){
   toast('Frame '+ (currentFrame+1) +' filled');
 }
 function clearFrame(){
-  if(animPlaying){stopAnim();toast('Stopped animation first');}
+  if(animPlaying){stopAnim();toast('Stopped animation');}
   if(animFrames.length===0){toast('Add a frame first');return;}
+  if(!confirm('Clear frame '+(currentFrame+1)+'? This only affects this frame.')){return;}
   for(let i=0;i<81;i++){ledColors[i]='#000000';}
   renderAnimGrid();
   animFrames[currentFrame]=[...ledColors];
@@ -694,6 +722,141 @@ for(let i=0;i<81;i++){const d=document.createElement('div');d.className='led-cel
 // Anim grid
 renderAnimGrid();
 loadSeqs(); loadAnimList(); refreshState(); updateFrameInfo();
+// Layout editor state
+let layoutGrid=[];
+let layoutRows=9, layoutCols=9;
+function buildLayoutGrid(){
+  layoutRows=parseInt(document.getElementById('layoutrows').value)||9;
+  layoutCols=parseInt(document.getElementById('layoutcols').value)||9;
+  layoutGrid=new Array(layoutRows*layoutCols).fill(-1);
+  renderLayoutGrid();
+  document.getElementById('layoutstatus').textContent='Grid '+layoutRows+'x'+layoutCols+' ('+layoutRows*layoutCols+' cells). Click cells to assign LED indices.';
+}
+function renderLayoutGrid(){
+  const el=document.getElementById('layoutgrid');
+  el.style.gridTemplateColumns='repeat('+layoutCols+',1fr)';
+  el.innerHTML='';
+  for(let i=0;i<layoutGrid.length;i++){
+    const d=document.createElement('div');
+    d.className='led-cell';
+    d.style.aspectRatio='1';
+    d.style.display='flex';
+    d.style.alignItems='center';
+    d.style.justifyContent='center';
+    d.style.fontSize='10px';
+    d.style.fontWeight='600';
+    d.style.cursor='pointer';
+    if(layoutGrid[i]>=0){d.style.background='linear-gradient(135deg,var(--accent),var(--accent2))';d.style.color='#fff';d.textContent=layoutGrid[i];}
+    else{d.style.background='#1a1a28';d.textContent='';}
+    d.onclick=()=>{const idx=parseInt(document.getElementById('layoutidx').value);if(!isNaN(idx)){layoutGrid[i]=idx;renderLayoutGrid();document.getElementById('layoutidx').value=idx+1;}};
+    d.oncontextmenu=(e)=>{e.preventDefault();layoutGrid[i]=-1;renderLayoutGrid();};
+    el.appendChild(d);
+  }
+}
+function presetLinear(){
+  if(!layoutGrid.length) buildLayoutGrid();
+  let idx=0;
+  for(let i=0;i<layoutGrid.length;i++){layoutGrid[i]=idx<81?idx:-1;idx++;}
+  renderLayoutGrid();
+  toast('Linear layout applied');
+}
+function presetSerpentine(){
+  if(!layoutGrid.length) buildLayoutGrid();
+  let idx=0;
+  for(let r=0;r<layoutRows;r++){
+    for(let c=0;c<layoutCols;c++){
+      const col = (r%2===0)?c:(layoutCols-1-c);
+      const pos = r*layoutCols+col;
+      layoutGrid[pos]= (idx<81)?idx:-1;
+      idx++;
+    }
+  }
+  renderLayoutGrid();
+  toast('Serpentine layout applied');
+}
+function autoFill(){
+  if(!layoutGrid.length) buildLayoutGrid();
+  let idx=0;
+  for(let i=0;i<layoutGrid.length;i++){
+    if(layoutGrid[i]<0){layoutGrid[i]=idx<81?idx:-1;idx++;}
+  }
+  renderLayoutGrid();
+  toast('Auto-filled');
+}
+function clearLayout(){
+  if(!layoutGrid.length) return;
+  for(let i=0;i<layoutGrid.length;i++) layoutGrid[i]=-1;
+  renderLayoutGrid();
+  toast('Layout cleared');
+}
+function saveLayout(){
+  if(!layoutGrid.length){toast('Build a grid first');return;}
+  localStorage.setItem('ledLayout', JSON.stringify({rows:layoutRows,cols:layoutCols,grid:layoutGrid}));
+  toast('Layout saved');
+}
+function loadLayout(){
+  const saved=localStorage.getItem('ledLayout');
+  if(saved){
+    const d=JSON.parse(saved);
+    document.getElementById('layoutrows').value=d.rows;
+    document.getElementById('layoutcols').value=d.cols;
+    layoutRows=d.rows; layoutCols=d.cols;
+    layoutGrid=d.grid;
+    renderLayoutGrid();
+    document.getElementById('layoutstatus').textContent='Loaded saved layout ('+layoutRows+'x'+layoutCols+')';
+  }
+}
+// Override renderAnimGrid to use layout
+const _origRenderAnimGrid=renderAnimGrid;
+function renderAnimGridLayout(){
+  const grid=document.getElementById('animgrid');
+  if(!grid) return;
+  if(!layoutGrid.length||layoutGrid.every(v=>v<0)){
+    _origRenderAnimGrid();
+    return;
+  }
+  grid.innerHTML='';
+  grid.style.gridTemplateColumns='repeat('+layoutCols+',1fr)';
+  grid.style.display='grid';
+  grid.style.gap='2px';
+  for(let i=0;i<layoutGrid.length;i++){
+    const ledIdx=layoutGrid[i];
+    const d=document.createElement('div');
+    d.className='led-cell';
+    d.style.aspectRatio='1';
+    d.style.display='flex';
+    d.style.alignItems='center';
+    d.style.justifyContent='center';
+    d.style.fontSize='9px';
+    d.style.fontWeight='600';
+    d.style.cursor='pointer';
+    if(ledIdx<0){d.style.background='#0a0a0f';d.style.opacity='0.3';d.textContent='';}
+    else{
+      d.style.background=ledColors[ledIdx]||'#1a1a28';
+      d.style.color='#fff';
+      d.textContent=ledIdx;
+      d.onmousedown=()=>{isPainting=true;paintLedLayout(ledIdx);};
+      d.onmouseenter=()=>{if(isPainting)paintLedLayout(ledIdx);};
+      d.onmouseup=()=>{isPainting=false;};
+    }
+    grid.appendChild(d);
+  }
+  document.onmouseup=()=>{isPainting=false;};
+}
+function paintLedLayout(ledIdx){
+  if(ledIdx<0) return;
+  const bs=parseInt(document.getElementById('brushsize').value);
+  for(let d=0;d<bs;d++){
+    if(ledIdx+d<81){ledColors[ledIdx+d]=paintColor;}
+  }
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  renderAnimGridLayout();
+}
+// Replace renderAnimGrid with layout-aware version
+renderAnimGrid=renderAnimGridLayout;
+loadLayout();
 // Keyboard shortcuts
 document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT') return;
