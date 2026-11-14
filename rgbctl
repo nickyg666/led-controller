@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""rgbctl — CLI for the RP2040 WS2811 addressable LED controller.
+
+Usage:
+  rgbctl [-h] [-V] [-d DEVICE] COMMAND [ARGS...]
+
+Commands:
+  PING                          Heartbeat (expect PONG)
+  RGB R G B [W]                 Fill WS2811 + PWM strip (optional white)
+  #RRGGBB                       Fill all LEDs (hex)
+  HSV H S V                     HSV (H 0-360, S/V 0-255)
+  PIX I R G B                   Set LED I (0-1023)
+  FILL R G B                    Fill all WS2811 LEDs
+  LEN N                         Set LED count (0-1024)
+  FRAME #RRGGBB,...             Set all LEDs from hex colors
+  SHOW                          Latch pixels to strip
+  CLEAR                         Turn off all LEDs
+  ANIM MODE                     Animation mode (see list below)
+  SPEED N                       Anim speed 1-255 (1=~400ms/tick)
+  TEMP C                        Set temp (-40..125); auto temp mode
+  RANDOM                        Random color
+  STATE                         Current values
+  OFF                           Turn off
+  WHITE W                       Set white LED (pin 14) 0-255
+  PWMRGB R G B [W]              PWM strip only (optional white)
+  PING                          Heartbeat
+  BOOT                          Reboot to BOOTSEL
+  HELP                          Full help from device
+
+Animation modes:
+  static breath rainbow strobe candle wave police random storm temp chase
+  fire sparkle comet theater running meteor bounce confetti sinelon juggle
+  plasma ripple wipe fade fireworks snake pulse glitter pride ocean aurora
+  lava matrix k2000 heartbeat colorcycle twinkle sparklewave stroberainbow
+  gradient demo
+
+Examples:
+  rgbctl PING
+  rgbctl RGB 255 0 0
+  rgbctl "#00FF00"
+  rgbctl PIX 0 255 0 0
+  rgbctl ANIM rainbow
+  rgbctl SPEED 10
+  rgbctl ANIM demo
+  rgbctl -d /dev/ttyACM1 STATE
+"""
+import argparse
+import glob
+import os
+import select
+import sys
+import termios
+import time
+
+DEVICE_GLOB = "/dev/ttyACM*"
+VERSION = "2.0"
+
+
+def find_device() -> str | None:
+    if os.path.exists("/dev/rp2040-rgb"):
+        return "/dev/rp2040-rgb"
+    devices = sorted(glob.glob(DEVICE_GLOB))
+    return devices[0] if devices else None
+
+
+def setup_port(fd: int) -> None:
+    attrs = termios.tcgetattr(fd)
+    attrs[1] = termios.OPOST | termios.ONLCR
+    attrs[3] = termios.CREAD | termios.CLOCAL
+    attrs[6][termios.VMIN] = 0
+    attrs[6][termios.VTIME] = 1
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+
+
+def send(device: str, cmd: str) -> int:
+    fd = os.open(device, os.O_RDWR | os.O_NOCTTY)
+    try:
+        setup_port(fd)
+        os.write(fd, (cmd + "\r\n").encode())
+        time.sleep(0.05)
+        while True:
+            r, _, _ = select.select([fd], [], [], 0.5)
+            if not r:
+                break
+            data = os.read(fd, 4096).decode(errors="replace")
+            for line in data.splitlines():
+                print(line.strip())
+    finally:
+        os.close(fd)
+    return 0
+
+
+def print_help() -> None:
+    print(__doc__)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="rgbctl",
+        description="RP2040 WS2811 addressable LED controller CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Run 'rgbctl HELP' for device-side help.",
+    )
+    parser.add_argument("-V", "--version", action="version", version=f"rgbctl {VERSION}")
+    parser.add_argument("-d", "--device", help="Serial device (auto-detected if omitted)")
+    parser.add_argument("command", nargs="?", default="PING", help="Command to send")
+    parser.add_argument("args", nargs="*", help="Command arguments")
+    args = parser.parse_args()
+
+    if args.command.lower() in ("help", "-h", "--help"):
+        # If -h/--help handled by argparse already; 'help' command prints local help
+        if args.command.lower() == "help":
+            print_help()
+            return 0
+
+    device = args.device or find_device()
+    if not device:
+        print("ERR: no /dev/ttyACM* or /dev/rp2040-rgb found. Plug the board in.", file=sys.stderr)
+        return 1
+
+    cmd = args.command
+    for a in args.args:
+        cmd += " " + str(a)
+
+    return send(device, cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

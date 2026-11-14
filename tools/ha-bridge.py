@@ -59,6 +59,7 @@ def send_serial(cmd):
         print(f"write err: {e}", flush=True)
         return
     time.sleep(0.05)
+    resp = b""
     while True:
         try:
             r, _, _ = select.select([ser_fd], [], [], 0.2)
@@ -74,16 +75,11 @@ def send_serial(cmd):
             break
         if len(n) <= 0:
             break
-
+        resp += n
+    if resp:
+        print(f"  serial resp to '{cmd}': {resp.decode(errors='replace').strip()}", flush=True)
 
 state = {"state": "OFF", "brightness": 255, "color": {"r": 255, "g": 0, "b": 0}, "base_color": {"r": 255, "g": 0, "b": 0}, "effect": "static"}
-
-
-def scaled_color():
-    b = state["brightness"] / 255.0
-    return {"r": int(state["base_color"]["r"] * b),
-            "g": int(state["base_color"]["g"] * b),
-            "b": int(state["base_color"]["b"] * b)}
 
 
 def publish_state(client):
@@ -91,7 +87,7 @@ def publish_state(client):
         "state": state["state"],
         "brightness": state["brightness"],
         "color_mode": "rgb",
-        "color": state["color"],
+        "color": state["base_color"],
         "effect": state["effect"],
     }
     client.publish(f"{TOPIC}/state", json.dumps(payload), retain=True)
@@ -109,34 +105,39 @@ def on_message(client, userdata, msg):
             if isinstance(data, str):
                 if data == "ON":
                     state["state"] = "ON"
-                    send_serial("SHOW")
+                    send_serial(f"BRIGHTNESS {state['brightness']}")
+                    sc = state["base_color"]
+                    send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
                 elif data == "OFF":
                     state["state"] = "OFF"
                     send_serial("OFF")
+                    send_serial("PWMRGB 0 0 0")
             elif isinstance(data, dict):
                 if "state" in data:
                     state["state"] = data["state"]
-                    if data["state"] == "ON":
-                        send_serial("SHOW")
-                    else:
+                    if data["state"] == "OFF":
                         send_serial("OFF")
-            if "color" in data:
-                c = data["color"]
-                r = c.get("r", 0); g = c.get("g", 0); b = c.get("b", 0)
-                state["base_color"] = {"r": r, "g": g, "b": b}
-                sc = scaled_color()
-                state["color"] = sc
-                send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
-            if "brightness" in data:
-                state["brightness"] = data["brightness"]
-                sc = scaled_color()
-                state["color"] = sc
-                send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
+                        send_serial("PWMRGB 0 0 0")
+                if "color" in data:
+                    c = data["color"]
+                    r = c.get("r", 0)
+                    g = c.get("g", 0)
+                    b = c.get("b", 0)
+                    state["base_color"] = {"r": r, "g": g, "b": b}
+                    state["color"] = {"r": r, "g": g, "b": b}
+                    send_serial(f"RGB {r} {g} {b}")
+                if "brightness" in data:
+                    state["brightness"] = data["brightness"]
+                    send_serial(f"BRIGHTNESS {state['brightness']}")
                 if "effect" in data:
                     eff = data["effect"]
                     if eff in EFFECTS:
                         state["effect"] = eff
                         send_serial(f"ANIM {eff}")
+                if data.get("state") == "ON" and "color" not in data and "effect" not in data and "brightness" not in data:
+                    send_serial(f"BRIGHTNESS {state['brightness']}")
+                    sc = state["base_color"]
+                    send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
         publish_state(client)
     except Exception as e:
         print(f"ERR in handler: {e}", flush=True)

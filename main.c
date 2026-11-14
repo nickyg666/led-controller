@@ -42,6 +42,7 @@ static uint8_t anim_mode  = 0;  /* 0=static 1=breath 2=rainbow 3=strobe
    37=twinkle 38=sparklewave 39=stroberainbow 40=gradient 41=demo */
 static uint pwm_wrap = 65535;
 static uint8_t pwm_r = 0, pwm_g = 0, pwm_b = 0, pwm_w = 0;
+static uint8_t global_brightness = 255;
 
 /* effect state */
 static uint8_t heat[MAX_LEDS];
@@ -179,6 +180,7 @@ static void pwm_init_pins(void) {
 
 static void apply_white(uint8_t w) {
     pwm_w = w;
+    w = (uint8_t)((uint16_t)w * global_brightness / 255);
     uint16_t wl = ((uint16_t)w * pwm_wrap) / 255;
     if (PWM_INVERT) pwm_set_gpio_level(PWM_WHITE_PIN, pwm_wrap - wl);
     else pwm_set_gpio_level(PWM_WHITE_PIN, wl);
@@ -186,6 +188,10 @@ static void apply_white(uint8_t w) {
 
 static void apply_pwm(uint8_t r, uint8_t g, uint8_t b) {
     pwm_r = r; pwm_g = g; pwm_b = b;
+    uint8_t br = global_brightness;
+    r = (uint8_t)((uint16_t)r * br / 255);
+    g = (uint8_t)((uint16_t)g * br / 255);
+    b = (uint8_t)((uint16_t)b * br / 255);
     uint16_t rl = ((uint16_t)r * pwm_wrap) / 255;
     uint16_t gl = ((uint16_t)g * pwm_wrap) / 255;
     uint16_t bl = ((uint16_t)b * pwm_wrap) / 255;
@@ -211,8 +217,13 @@ static void strip_show(void) {
     while (!pio_sm_is_tx_fifo_empty(strip_pio, strip_sm)) tight_loop_contents();
     busy_wait_us(100);
 
+    uint8_t br = global_brightness;
     for (uint16_t i = 0; i < led_count; i++) {
-        pio_sm_put_blocking(strip_pio, strip_sm, pixels[i]);
+        uint32_t p = pixels[i];
+        uint8_t gg = ((p >> 24) & 0xFF) * br / 255;
+        uint8_t rr = ((p >> 16) & 0xFF) * br / 255;
+        uint8_t bb = ((p >> 8) & 0xFF) * br / 255;
+        pio_sm_put_blocking(strip_pio, strip_sm, pack_rgb(rr, gg, bb));
     }
     strip_dirty = false;
 }
@@ -924,21 +935,23 @@ static void process_command(const char *cmd) {
         if (n >= 3 &&
             r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255 &&
             (n == 3 || (w >= 0 && w <= 255))) {
+            anim_mode = 0;
             cur_r = (uint8_t)r; cur_g = (uint8_t)g; cur_b = (uint8_t)b;
             fill_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
             apply_pwm((uint8_t)r, (uint8_t)g, (uint8_t)b);
             if (n == 4) apply_white((uint8_t)w);
-            printf("OK RGB=%d,%d,%d W=%d\n", r, g, b, (n == 4 ? w : (r<g?(r<b?r:b):(g<b?g:b))));
+            printf("OK RGB=%d,%d,%d W=%d\\n", r, g, b, (n == 4 ? w : (r<g?(r<b?r:b):(g<b?g:b))));
         } else {
             printf("ERR: RGB needs 3 or 4 values 0-255\n");
         }
     } else if (cmd[0] == '#') {
         unsigned int r, g, b;
         if (strlen(cmd) >= 7 && sscanf(cmd, "#%02x%02x%02x", &r, &g, &b) == 3) {
+            anim_mode = 0;
             cur_r = (uint8_t)r; cur_g = (uint8_t)g; cur_b = (uint8_t)b;
             fill_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
             apply_pwm((uint8_t)r, (uint8_t)g, (uint8_t)b);
-            printf("OK #%02X%02X%02X\n", r, g, b);
+            printf("OK #%02X%02X%02X\\n", r, g, b);
         } else {
             printf("ERR: hex format #RRGGBB\n");
         }
@@ -948,9 +961,11 @@ static void process_command(const char *cmd) {
             h >= 0 && h <= 360 && s >= 0 && s <= 255 && v >= 0 && v <= 255) {
             uint8_t r, g, b;
             hsv_to_rgb((uint16_t)h % 360, (uint8_t)s, (uint8_t)v, &r, &g, &b);
+            anim_mode = 0;
             cur_r = r; cur_g = g; cur_b = b;
             fill_rgb(r, g, b);
-            printf("OK HSV->RGB=%d,%d,%d\n", r, g, b);
+            apply_pwm(r, g, b);
+            printf("OK HSV->RGB=%d,%d,%d\\n", r, g, b);
         } else {
             printf("ERR: HSV needs 3 values: h 0-360 s 0-255 v 0-255\n");
         }
@@ -968,9 +983,11 @@ static void process_command(const char *cmd) {
         int r, g, b;
         if (sscanf(cmd + 4, "%d %d %d", &r, &g, &b) == 3 &&
             r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+            anim_mode = 0;
             cur_r = (uint8_t)r; cur_g = (uint8_t)g; cur_b = (uint8_t)b;
             fill_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
-            printf("OK FILL=%d,%d,%d\n", r, g, b);
+            apply_pwm((uint8_t)r, (uint8_t)g, (uint8_t)b);
+            printf("OK FILL=%d,%d,%d\\n", r, g, b);
         } else {
             printf("ERR: FILL needs 3 values 0-255\n");
         }
@@ -989,9 +1006,21 @@ static void process_command(const char *cmd) {
         int w;
         if (sscanf(cmd + 5, "%d", &w) == 1 && w >= 0 && w <= 255) {
             apply_white((uint8_t)w);
-            printf("OK WHITE=%d\n", w);
+            printf("OK WHITE=%d\\n", w);
         } else {
-            printf("ERR: WHITE 0-255\n");
+            printf("ERR: WHITE 0-255\\n");
+        }
+    } else if (strncmp(cmd, "BRIGHTNESS", 10) == 0 && isspace((unsigned char)cmd[10])) {
+        int b;
+        if (sscanf(cmd + 10, "%d", &b) == 1 && b >= 0 && b <= 255) {
+            global_brightness = (uint8_t)b;
+            strip_dirty = true;
+            /* re-apply PWM with current colors */
+            apply_pwm(pwm_r, pwm_g, pwm_b);
+            apply_white(pwm_w);
+            printf("OK BRIGHTNESS=%d\n", b);
+        } else {
+            printf("ERR: BRIGHTNESS 0-255\\n");
         }
     } else if (strncmp(cmd, "LEN", 3) == 0 && isspace((unsigned char)cmd[3])) {
         int n;
@@ -1136,7 +1165,8 @@ static void process_command(const char *cmd) {
         printf("HELP Commands:\n");
         printf("  RGB <r> <g> <b> [w]  Fill WS2811 + PWM (optional white)\n");
         printf("  PWMRGB <r> <g> <b> [w]  PWM strip only (optional white)\n");
-        printf("  WHITE <w>            Set white LED (pin 14) 0-255\n");
+        printf("  WHITE <w>            Set white LED (pin 14) 0-255\\n");
+        printf("  BRIGHTNESS <0-255>   Global brightness (dims effects too)\\n");
         printf("  #RRGGBB              Fill all LEDs (hex)\n");
         printf("  HSV <h> <s> <v>      Fill all LEDs (h 0-360 s/v 0-255)\n");
         printf("  PIX <i> <r> <g> <b>  Set LED i (0-%d)\n", MAX_LEDS - 1);
