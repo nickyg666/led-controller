@@ -358,11 +358,16 @@ select{cursor:pointer;min-width:120px}
   <div class="row">
     <span class="label">Paint color</span>
     <input type="color" id="animcolor" value="#ff0000">
-    <span class="label">Brush size</span>
+    <span class="label">Brush</span>
     <select id="brushsize"><option value="1">1 LED</option><option value="2">2 LEDs</option><option value="3">3 LEDs</option><option value="5">5 LEDs</option></select>
-    <button class="btn btn-sm" onclick="addFrame()">+ Add Frame</button>
+    <button class="btn btn-sm" onclick="fillFrame()">Fill Frame</button>
+    <button class="btn btn-sm" onclick="clearFrame()">Clear Frame</button>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <button class="btn btn-sm btn-success" onclick="addFrame()">+ Add Frame</button>
     <button class="btn btn-sm btn-ghost" onclick="dupFrame()">Duplicate</button>
     <button class="btn btn-sm btn-danger" onclick="delFrame()">Delete Frame</button>
+    <span class="label" style="margin-left:8px">Frame <span id="frameinfo">0/0</span></span>
   </div>
   <div class="anim-preview" id="animpreview"><div class="led-row" id="previewrow"></div></div>
   <div class="anim-timeline" id="timeline"></div>
@@ -471,12 +476,6 @@ function fillAll(){const hex=document.getElementById('fillcolor').value;const r=
 function refreshState(){fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'STATE'})}).then(r=>r.text()).then(t=>document.getElementById('status').textContent=t);}
 
 // Animation Editor
-let animFrames=[];
-let currentFrame=0;
-let animPlaying=false;
-let animInterval=null;
-let ledColors=new Array(81).fill('#000000');
-let paintColor='#ff0000';
 
 function renderAnimGrid(){
   const grid=document.getElementById('animgrid');
@@ -498,6 +497,29 @@ function paintLed(i){
   for(let d=0;d<bs;d++){
     if(i+d<81){ledColors[i+d]=paintColor;document.querySelectorAll('#animgrid .led-cell')[i+d].style.background=paintColor;}
   }
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+}
+function fillFrame(){
+  for(let i=0;i<81;i++){ledColors[i]=paintColor;}
+  renderAnimGrid();
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  toast('Frame filled');
+}
+function clearFrame(){
+  for(let i=0;i<81;i++){ledColors[i]='#000000';}
+  renderAnimGrid();
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  toast('Frame cleared');
+}
+function updateFrameInfo(){
+  const el=document.getElementById('frameinfo');
+  if(el) el.textContent=(animFrames.length?currentFrame+1:0)+'/'+animFrames.length;
 }
 document.addEventListener('DOMContentLoaded',()=>{
   const pc=document.getElementById('animcolor');
@@ -520,7 +542,7 @@ function renderTimeline(){
     div.appendChild(canvas);
     const num=document.createElement('div');num.className='frame-num';num.textContent=i+1;div.appendChild(num);
     const del=document.createElement('div');del.className='frame-del';del.textContent='×';del.onclick=(e)=>{e.stopPropagation();delFrame(i);};div.appendChild(del);
-    div.onclick=()=>{currentFrame=i;loadFrame(i);renderTimeline();};
+    div.onclick=()=>{loadFrame(i);};
     tl.appendChild(div);
   });
 }
@@ -534,9 +556,15 @@ function renderPreview(){
 }
 function loadFrame(i){
   if(i<0||i>=animFrames.length) return;
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  currentFrame=i;
   ledColors=[...animFrames[i]];
   renderAnimGrid();
   renderPreview();
+  renderTimeline();
+  updateFrameInfo();
 }
 function addFrame(){
   const frame=[...ledColors];
@@ -544,6 +572,7 @@ function addFrame(){
   currentFrame=animFrames.length-1;
   renderTimeline();
   renderPreview();
+  updateFrameInfo();
   toast('Frame '+animFrames.length+' added');
 }
 function dupFrame(){
@@ -552,6 +581,7 @@ function dupFrame(){
   currentFrame++;
   loadFrame(currentFrame);
   renderTimeline();
+  updateFrameInfo();
   toast('Frame duplicated');
 }
 function delFrame(idx){
@@ -562,6 +592,7 @@ function delFrame(idx){
   loadFrame(currentFrame);
   renderTimeline();
   renderPreview();
+  updateFrameInfo();
   toast('Frame deleted');
 }
 function updateFrameDelay(){
@@ -639,7 +670,17 @@ const grid=document.getElementById('ledgrid');
 for(let i=0;i<81;i++){const d=document.createElement('div');d.className='led-cell';d.title='LED '+i;d.onclick=()=>{document.getElementById('pixi').value=i;};grid.appendChild(d);}
 // Anim grid
 renderAnimGrid();
-loadSeqs(); loadAnimList(); refreshState();
+loadSeqs(); loadAnimList(); refreshState(); updateFrameInfo();
+// Keyboard shortcuts
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT') return;
+  if(e.code==='Space'){e.preventDefault();animPlaying?stopAnim():playAnim();}
+  if(e.code==='ArrowRight'){e.preventDefault();if(currentFrame<animFrames.length-1)loadFrame(currentFrame+1);}
+  if(e.code==='ArrowLeft'){e.preventDefault();if(currentFrame>0)loadFrame(currentFrame-1);}
+  if(e.code==='KeyN'){e.preventDefault();addFrame();}
+  if(e.code==='KeyD'){e.preventDefault();dupFrame();}
+  if(e.code==='Delete'){e.preventDefault();delFrame();}
+});
 </script></body></html>"""
 
 anim_thread = None
