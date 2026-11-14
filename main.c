@@ -940,7 +940,7 @@ static void process_command(const char *cmd) {
             fill_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
             apply_pwm((uint8_t)r, (uint8_t)g, (uint8_t)b);
             if (n == 4) apply_white((uint8_t)w);
-            printf("OK RGB=%d,%d,%d W=%d\\n", r, g, b, (n == 4 ? w : (r<g?(r<b?r:b):(g<b?g:b))));
+            printf("OK RGB=%d,%d,%d W=%d\n", r, g, b, (n == 4 ? w : (r<g?(r<b?r:b):(g<b?g:b))));
         } else {
             printf("ERR: RGB needs 3 or 4 values 0-255\n");
         }
@@ -951,7 +951,7 @@ static void process_command(const char *cmd) {
             cur_r = (uint8_t)r; cur_g = (uint8_t)g; cur_b = (uint8_t)b;
             fill_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
             apply_pwm((uint8_t)r, (uint8_t)g, (uint8_t)b);
-            printf("OK #%02X%02X%02X\\n", r, g, b);
+            printf("OK #%02X%02X%02X\n", r, g, b);
         } else {
             printf("ERR: hex format #RRGGBB\n");
         }
@@ -965,7 +965,7 @@ static void process_command(const char *cmd) {
             cur_r = r; cur_g = g; cur_b = b;
             fill_rgb(r, g, b);
             apply_pwm(r, g, b);
-            printf("OK HSV->RGB=%d,%d,%d\\n", r, g, b);
+            printf("OK HSV->RGB=%d,%d,%d\n", r, g, b);
         } else {
             printf("ERR: HSV needs 3 values: h 0-360 s 0-255 v 0-255\n");
         }
@@ -987,7 +987,7 @@ static void process_command(const char *cmd) {
             cur_r = (uint8_t)r; cur_g = (uint8_t)g; cur_b = (uint8_t)b;
             fill_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
             apply_pwm((uint8_t)r, (uint8_t)g, (uint8_t)b);
-            printf("OK FILL=%d,%d,%d\\n", r, g, b);
+            printf("OK FILL=%d,%d,%d\n", r, g, b);
         } else {
             printf("ERR: FILL needs 3 values 0-255\n");
         }
@@ -1006,9 +1006,9 @@ static void process_command(const char *cmd) {
         int w;
         if (sscanf(cmd + 5, "%d", &w) == 1 && w >= 0 && w <= 255) {
             apply_white((uint8_t)w);
-            printf("OK WHITE=%d\\n", w);
+            printf("OK WHITE=%d\n", w);
         } else {
-            printf("ERR: WHITE 0-255\\n");
+            printf("ERR: WHITE 0-255\n");
         }
     } else if (strncmp(cmd, "BRIGHTNESS", 10) == 0 && isspace((unsigned char)cmd[10])) {
         int b;
@@ -1020,7 +1020,7 @@ static void process_command(const char *cmd) {
             apply_white(pwm_w);
             printf("OK BRIGHTNESS=%d\n", b);
         } else {
-            printf("ERR: BRIGHTNESS 0-255\\n");
+            printf("ERR: BRIGHTNESS 0-255\n");
         }
     } else if (strncmp(cmd, "LEN", 3) == 0 && isspace((unsigned char)cmd[3])) {
         int n;
@@ -1165,8 +1165,8 @@ static void process_command(const char *cmd) {
         printf("HELP Commands:\n");
         printf("  RGB <r> <g> <b> [w]  Fill WS2811 + PWM (optional white)\n");
         printf("  PWMRGB <r> <g> <b> [w]  PWM strip only (optional white)\n");
-        printf("  WHITE <w>            Set white LED (pin 14) 0-255\\n");
-        printf("  BRIGHTNESS <0-255>   Global brightness (dims effects too)\\n");
+        printf("  WHITE <w>            Set white LED (pin 14) 0-255\n");
+        printf("  BRIGHTNESS <0-255>   Global brightness (dims effects too)\n");
         printf("  #RRGGBB              Fill all LEDs (hex)\n");
         printf("  HSV <h> <s> <v>      Fill all LEDs (h 0-360 s/v 0-255)\n");
         printf("  PIX <i> <r> <g> <b>  Set LED i (0-%d)\n", MAX_LEDS - 1);
@@ -1175,7 +1175,7 @@ static void process_command(const char *cmd) {
         printf("  FRAME #RRGGBB,...    Set all LEDs from hex colors\n");
         printf("  SHOW                 Latch pixels to strip\n");
         printf("  CLEAR                Turn off all LEDs\n");
-        printf("  ANIM static breath rainbow strobe candle wave police random storm temp chase fire sparkle comet theater running meteor bounce confetti sinelon juggle plasma ripple wipe fade fireworks snake pulse glitter pride ocean aurora lava matrix k2000 heartbeat colorcycle twinkle sparklewave stroberainbow gradient demo\\n");
+        printf("  ANIM static breath rainbow strobe candle wave police random storm temp chase fire sparkle comet theater running meteor bounce confetti sinelon juggle plasma ripple wipe fade fireworks snake pulse glitter pride ocean aurora lava matrix k2000 heartbeat colorcycle twinkle sparklewave stroberainbow gradient demo\n");
         printf("  SPEED <1-255>        Anim speed\n");
         printf("  TEMP <celsius>       Set temp (-40..125); auto-switches to anim=temp\n");
         printf("  RANDOM               Random color\n");
