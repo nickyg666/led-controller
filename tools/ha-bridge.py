@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Bridge RP2040 WS2811 controller <-> MQTT for Home Assistant discovery."""
+import json
+import os
+import select
+import sys
+import time
+import glob
+import termios
+import traceback
+
+import paho.mqtt.client as mqtt
+
+BROKER = "127.0.0.1"
+PORT = 1883
+TOPIC = "rp2040_led"
+PREFIX = "homeassistant/light/" + TOPIC
+
+EFFECTS = ["static","breath","rainbow","strobe","candle","wave","police","random",
+           "storm","temp","chase","fire","sparkle","comet","theater","running",
+           "meteor","bounce","confetti","sinelon","juggle","plasma","ripple",
+           "wipe","fade","fireworks","snake","pulse","glitter","pride","ocean",
+           "aurora","lava","matrix","k2000","heartbeat","colorcycle","twinkle",
+           "sparklewave","stroberainbow","gradient","demo"]
+
+ser_fd = None
+
+
+def find_device():
+    if os.path.exists("/dev/rp2040-rgb"):
+        return "/dev/rp2040-rgb"
+    ds = sorted(glob.glob("/dev/ttyACM*"))
+    return ds[0] if ds else None
+
+
+def open_serial(dev):
+    global ser_fd
+    ser_fd = os.open(dev, os.O_RDWR | os.O_NOCTTY)
+    attrs = termios.tcgetattr(ser_fd)
+    attrs[1] = termios.OPOST | termios.ONLCR
+    attrs[3] = termios.CREAD | termios.CLOCAL
+    attrs[6][termios.VMIN] = 0
+    attrs[6][termios.VTIME] = 1
+    termios.tcsetattr(ser_fd, termios.TCSANOW, attrs)
+    time.sleep(0.5)
+    while True:
+        r, _, _ = select.select([ser_fd], [], [], 0.2)
+        if not r:
+            break
+        os.read(ser_fd, 4096)
+
+
+def send_serial(cmd):
+    if ser_fd is None:
+        return
+    try:
+        os.write(ser_fd, (cmd + "\r\n").encode())
+    except OSError as e:
+        print(f"write err: {e}", flush=True)
+        return
+    time.sleep(0.05)
+    while True:
+        try:
+            r, _, _ = select.select([ser_fd], [], [], 0.2)
+        except Exception as e:
+            print(f"select err: {e}", flush=True)
+            break
+        if not r:
+            break
+        try:
+            n = os.read(ser_fd, 4096)
+        except OSError as e:
+            print(f"read err: {e}", flush=True)
+            break
+        if len(n) <= 0:
+            break
+
+
+state = {"state": "OFF", "brightness": 255, "color": {"r": 255, "g": 0, "b": 0}, "base_color": {"r": 255, "g": 0, "b": 0}, "effect": "static"}
+
+
+def scaled_color():
+    b = state["brightness"] / 255.0
+    return {"r": int(state["base_color"]["r"] * b),
+            "g": int(state["base_color"]["g"] * b),
+            "b": int(state["base_color"]["b"] * b)}
+
+
+def publish_state(client):
+    payload = {
+        "state": state["state"],
+        "brightness": state["brightness"],
+        "color_mode": "rgb",
+        "color": state["color"],
+        "effect": state["effect"],
+    }
+    client.publish(f"{TOPIC}/state", json.dumps(payload), retain=True)
+
+
+def on_message(client, userdata, msg):
+    print(f"RECV {msg.topic}: {msg.payload.decode()}", flush=True)
+    try:
+        data = json.loads(msg.payload.decode())
+    except Exception:
+        data = {}
+    global state
+    try:
+        if msg.topic == f"{TOPIC}/set":
+            if isinstance(data, str):
+                if data == "ON":
+                    state["state"] = "ON"
+                    send_serial("SHOW")
+                elif data == "OFF":
+                    state["state"] = "OFF"
+                    send_serial("OFF")
+            elif isinstance(data, dict):
+                if "state" in data:
+                    state["state"] = data["state"]
+                    if data["state"] == "ON":
+                        send_serial("SHOW")
+                    else:
+                        send_serial("OFF")
+            if "color" in data:
+                c = data["color"]
+                r = c.get("r", 0); g = c.get("g", 0); b = c.get("b", 0)
+                state["base_color"] = {"r": r, "g": g, "b": b}
+                sc = scaled_color()
+                state["color"] = sc
+                send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
+            if "brightness" in data:
+                state["brightness"] = data["brightness"]
+                sc = scaled_color()
+                state["color"] = sc
+                send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
+                if "effect" in data:
+                    eff = data["effect"]
+                    if eff in EFFECTS:
+                        state["effect"] = eff
+                        send_serial(f"ANIM {eff}")
+        publish_state(client)
+    except Exception as e:
+        print(f"ERR in handler: {e}", flush=True)
+        traceback.print_exc()
+
+
+def on_connect(client, userdata, flags, rc, props=None):
+    disc = {
+        "name": "PC lights",
+        "unique_id": "pc_lights_v2",
+        "command_topic": f"{TOPIC}/set",
+        "state_topic": f"{TOPIC}/state",
+        "brightness": True,
+        "brightness_scale": 255,
+        "color_mode": "rgb",
+        "supported_color_modes": ["rgb"],
+        "effect": True,
+        "effect_list": EFFECTS,
+        "schema": "json",
+    }
+    client.publish(f"{PREFIX}/config", json.dumps(disc), retain=True)
+    client.subscribe(f"{TOPIC}/set")
+    publish_state(client)
+
+
+def main():
+    dev = find_device()
+    if not dev:
+        print("No device found", file=sys.stderr)
+        sys.exit(1)
+    open_serial(dev)
+    print(f"Serial: {dev}", flush=True)
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(BROKER, PORT, 60)
+    print(f"MQTT: {BROKER}:{PORT}", flush=True)
+    try:
+        client.loop_forever()
+    except Exception as e:
+        print(f"loop err: {e}", flush=True)
+        import traceback; traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()
