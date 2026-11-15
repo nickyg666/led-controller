@@ -31,71 +31,17 @@ def find_device():
     return ds[0] if ds else None
 
 
-def send_cmd(cmd, retries=2):
-    global DEV
-    for attempt in range(retries+1):
-        if DEV is None:
-            DEV = find_device()
-        if not DEV:
-            return "no device"
-        try:
-            fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY)
-        except OSError as e:
-            DEV = None
-            if attempt < retries:
-                time.sleep(0.5)
-                continue
-            return f"open err: {e}"
-        try:
-            attrs = termios.tcgetattr(fd)
-            attrs[1] = termios.OPOST | termios.ONLCR
-            attrs[3] = termios.CREAD | termios.CLOCAL
-            attrs[6][termios.VMIN] = 0
-            attrs[6][termios.VTIME] = 1
-            termios.tcsetattr(fd, termios.TCSANOW, attrs)
-            # flush input
-            while True:
-                r, _, _ = select.select([fd], [], [], 0.05)
-                if not r:
-                    break
-                os.read(fd, 4096)
-            os.write(fd, (cmd + "\\r\\n").encode())
-            time.sleep(0.1)
-            resp = b""
-            while True:
-                r, _, _ = select.select([fd], [], [], 0.3)
-                if not r:
-                    break
-                n = os.read(fd, 4096)
-                if len(n) <= 0:
-                    break
-                resp += n
-            return resp.decode(errors="replace").strip()
-        except OSError as e:
-            try:
-                os.close(fd)
-            except:
-                pass
-            DEV = None
-            if attempt < retries:
-                time.sleep(0.5)
-                continue
-            return f"err: {e}"
-        finally:
-            try:
-                os.close(fd)
-            except:
-                pass
-
-
-def send_frame(colors):
-    """Send an Adalight frame directly."""
+def send_cmd(cmd):
     global DEV
     if DEV is None:
         DEV = find_device()
     if not DEV:
-        return
-    fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY)
+        return "no device"
+    try:
+        fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY)
+    except OSError as e:
+        DEV = None
+        return f"open err: {e}"
     try:
         attrs = termios.tcgetattr(fd)
         attrs[1] = termios.OPOST | termios.ONLCR
@@ -103,16 +49,33 @@ def send_frame(colors):
         attrs[6][termios.VMIN] = 0
         attrs[6][termios.VTIME] = 1
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
-        n = len(colors)
-        # Adalight header
-        buf = bytes([0x41, 0x64, 0x61, (n >> 8) & 0xFF, n & 0xFF,
-                     ((n >> 8) & 0xFF) ^ (n & 0xFF) ^ 0x55])
-        for c in colors:
-            buf += bytes([c[1], c[0], c[2]])  # GRB order for WS2811
-        os.write(fd, buf)
-        time.sleep(0.02)
+        # flush
+        while True:
+            r, _, _ = select.select([fd], [], [], 0.1)
+            if not r:
+                break
+            os.read(fd, 4096)
+        os.write(fd, (cmd + "\r\n").encode())
+        time.sleep(0.2)
+        resp = b""
+        while True:
+            r, _, _ = select.select([fd], [], [], 0.3)
+            if not r:
+                break
+            n = os.read(fd, 4096)
+            if len(n) <= 0:
+                break
+            resp += n
+        result = resp.decode(errors="replace").strip()
+        return result if result else "OK"
+    except OSError as e:
+        DEV = None
+        return f"err: {e}"
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except:
+            pass
 
 
 def load_seqs():
