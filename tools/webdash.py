@@ -1201,6 +1201,7 @@ document.addEventListener('keydown',e=>{
 
 anim_thread = None
 anim_stop = threading.Event()
+seq_stop = threading.Event()
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -1263,12 +1264,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/seq/run":
             name = data.get("name", "")
             seqs = load_seqs()
+            seq_stop.set()  # stop any running sequence
+            time.sleep(0.1)
+            seq_stop.clear()
             def runner():
                 seq = seqs.get(name, {})
                 colors = seq.get("colors", [])
                 delay = seq.get("delay", 0.3)
-                while True:
+                while not seq_stop.is_set():
                     for hexc in colors:
+                        if seq_stop.is_set():
+                            break
                         r = int(hexc[1:3], 16); g = int(hexc[3:5], 16); b = int(hexc[5:7], 16)
                         send_cmd(f"RGB {r} {g} {b}")
                         time.sleep(delay)
@@ -1289,6 +1295,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(f"Deleted '{name}'".encode())
         elif self.path == "/api/seq/stop":
+            seq_stop.set()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
