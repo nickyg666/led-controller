@@ -31,34 +31,61 @@ def find_device():
     return ds[0] if ds else None
 
 
-def send_cmd(cmd):
+def send_cmd(cmd, retries=2):
     global DEV
-    if DEV is None:
-        DEV = find_device()
-    if not DEV:
-        return "no device"
-    fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY)
-    try:
-        attrs = termios.tcgetattr(fd)
-        attrs[1] = termios.OPOST | termios.ONLCR
-        attrs[3] = termios.CREAD | termios.CLOCAL
-        attrs[6][termios.VMIN] = 0
-        attrs[6][termios.VTIME] = 1
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-        os.write(fd, (cmd + "\r\n").encode())
-        time.sleep(0.05)
-        resp = b""
-        while True:
-            r, _, _ = select.select([fd], [], [], 0.2)
-            if not r:
-                break
-            n = os.read(fd, 4096)
-            if len(n) <= 0:
-                break
-            resp += n
-        return resp.decode(errors="replace").strip()
-    finally:
-        os.close(fd)
+    for attempt in range(retries+1):
+        if DEV is None:
+            DEV = find_device()
+        if not DEV:
+            return "no device"
+        try:
+            fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY)
+        except OSError as e:
+            DEV = None
+            if attempt < retries:
+                time.sleep(0.5)
+                continue
+            return f"open err: {e}"
+        try:
+            attrs = termios.tcgetattr(fd)
+            attrs[1] = termios.OPOST | termios.ONLCR
+            attrs[3] = termios.CREAD | termios.CLOCAL
+            attrs[6][termios.VMIN] = 0
+            attrs[6][termios.VTIME] = 1
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+            # flush input
+            while True:
+                r, _, _ = select.select([fd], [], [], 0.05)
+                if not r:
+                    break
+                os.read(fd, 4096)
+            os.write(fd, (cmd + "\\r\\n").encode())
+            time.sleep(0.1)
+            resp = b""
+            while True:
+                r, _, _ = select.select([fd], [], [], 0.3)
+                if not r:
+                    break
+                n = os.read(fd, 4096)
+                if len(n) <= 0:
+                    break
+                resp += n
+            return resp.decode(errors="replace").strip()
+        except OSError as e:
+            try:
+                os.close(fd)
+            except:
+                pass
+            DEV = None
+            if attempt < retries:
+                time.sleep(0.5)
+                continue
+            return f"err: {e}"
+        finally:
+            try:
+                os.close(fd)
+            except:
+                pass
 
 
 def send_frame(colors):
@@ -512,7 +539,8 @@ function renderSeq(){const el=document.getElementById('seqbuilder');el.innerHTML
 async function runSeq(){if(!seqColors.length){toast('Add colors first');return;}for(let i=0;i<seqColors.length;i++){const hex=seqColors[i];const r=parseInt(hex.slice(1,3),16);const g=parseInt(hex.slice(3,5),16);const b=parseInt(hex.slice(5,7),16);await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'RGB '+r+' '+g+' '+b})});await new Promise(res=>setTimeout(res,parseInt(document.getElementById('seqdelay').value)||300));}toast('Sequence done');}
 function stopSeq(){cmd('OFF');}
 function saveSeq(){const name=document.getElementById('seqname').value.trim();if(!name||!seqColors.length){toast('Name and colors required');return;}fetch('/api/seq/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,colors:seqColors,delay:parseInt(document.getElementById('seqdelay').value)||300})}).then(r=>r.text()).then(t=>{toast(t);loadSeqs();});}
-function loadSeqs(){fetch('/api/seq/list').then(r=>r.json()).then(data=>{const el=document.getElementById('seqlist');el.innerHTML='';const keys=Object.keys(data);if(!keys.length){el.innerHTML='<div style="color:var(--muted);font-size:13px">No saved sequences</div>';return;}keys.forEach(name=>{const d=document.createElement('div');d.className='seq-card';const dots=data[name].colors.map(c=>'<div class="seq-dot" style="background:'+c+'"></div>').join('');d.innerHTML='<div class="seq-dots">'+dots+'</div><div class="seq-info"><div class="seq-name">'+name+'</div><div class="seq-meta">'+data[name].colors.length+' colors &middot; '+(data[name].delay*1000).toFixed(0)+'ms delay</div></div><div class="seq-actions"><button class="btn btn-sm btn-success" onclick="runSaved(\''+name+'\')">Run</button><button class="btn btn-sm btn-ghost" onclick="syncOne(\''+name+'\')">Sync HA</button><button class="btn btn-sm btn-danger" onclick="delSeq(\''+name+'\')">Delete</button></div>';el.appendChild(d);});});}
+function loadSeqs(){fetch('/api/seq/list').then(r=>r.json()).then(data=>{const el=document.getElementById('seqlist');el.innerHTML='';const keys=Object.keys(data);if(!keys.length){el.innerHTML='<div style="color:var(--muted);font-size:13px">No saved sequences</div>';return;}keys.forEach(name=>{const d=document.createElement('div');d.className='seq-card';const dots=data[name].colors.map(c=>'<div class="seq-dot" style="background:'+c+'"></div>').join('');d.innerHTML='<div class="seq-dots">'+dots+'</div><div class="seq-info"><div class="seq-name">'+name+'</div><div class="seq-meta">'+data[name].colors.length+' colors &middot; '+(data[name].delay*1000).toFixed(0)+'ms delay</div></div><div class="seq-actions"><button class="btn btn-sm btn-success" onclick="runSaved(\''+name+'\')">Run</button><button class="btn btn-sm" onclick="editSeq(\''+name+'\')">Edit</button><button class="btn btn-sm btn-ghost" onclick="syncOne(\''+name+'\')">Sync HA</button><button class="btn btn-sm btn-danger" onclick="delSeq(\''+name+'\')">Delete</button></div>';el.appendChild(d);});});}
+function editSeq(name){fetch('/api/seq/list').then(r=>r.json()).then(data=>{const seq=data[name];if(!seq){toast('Not found');return;}seqColors=[...seq.colors];document.getElementById('seqdelay').value=Math.round((seq.delay||0.3)*1000);document.getElementById('seqname').value=name;renderSeq();toast('Loaded '+name+' for editing');});}
 function runSaved(name){fetch('/api/seq/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})}).then(r=>r.text()).then(t=>toast(t));}
 function delSeq(name){fetch('/api/seq/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})}).then(r=>r.text()).then(t=>{toast(t);loadSeqs();});}
 function syncOne(name){fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})}).then(r=>r.text()).then(t=>toast(t));}
@@ -755,6 +783,7 @@ let shapeZoom=20;
 let shapeMode='place';
 let shapeNextIdx=0;
 let shapeDragging=null;
+let shapeSelected=null;
 let shapeDragOffset={x:0,y:0};
 
 function buildLayoutGrid(){
@@ -810,6 +839,11 @@ function drawShapeCanvas(){
     const hue=(parseInt(idx)/Math.max(1,Object.keys(shapeGrid).length))*360;
     ctx.fillStyle='hsl('+hue+',80%,55%)';
     ctx.fillRect(x+1,y+1,cellSize-2,cellSize-2);
+    if(shapeSelected===parseInt(idx)){
+      ctx.strokeStyle='#fff';
+      ctx.lineWidth=3;
+      ctx.strokeRect(x+2,y+2,cellSize-4,cellSize-4);
+    }
     ctx.fillStyle='#fff';
     ctx.font='bold '+(Math.max(8,cellSize/3))+'px sans-serif';
     ctx.textAlign='center';
@@ -842,9 +876,30 @@ function shapeCanvasClick(e){
   } else if(shapeMode==='erase'){
     if(shapeGrid[key]!==undefined){
       delete shapeGrid[key];
-      // renumber
       renumberShape();
       drawShapeCanvas();
+    }
+  } else if(shapeMode==='move'){
+    if(shapeSelected!==null){
+      // Place selected LED at new position
+      if(shapeGrid[key]===undefined){
+        const idx=shapeSelected;
+        // Remove from old position
+        for(const k in shapeGrid){ if(shapeGrid[k]===idx) delete shapeGrid[k]; }
+        shapeGrid[key]=idx;
+        shapeSelected=null;
+        drawShapeCanvas();
+        toast('Moved LED '+idx);
+      } else {
+        toast('Target occupied');
+      }
+    } else {
+      // Select an LED
+      if(shapeGrid[key]!==undefined){
+        shapeSelected=shapeGrid[key];
+        toast('Selected LED '+shapeSelected+'. Click destination.');
+        drawShapeCanvas();
+      }
     }
   }
 }
@@ -1020,7 +1075,7 @@ function paintLedLayout(ledIdx){
 renderAnimGrid=renderAnimGridLayout;
 
 // Canvas click handler
-document.addEventListener('DOMContentLoaded',()=>{
+function initShapeCanvas(){
   const canvas=document.getElementById('shapeCanvas');
   if(canvas){
     canvas.addEventListener('click',shapeCanvasClick);
@@ -1028,7 +1083,15 @@ document.addEventListener('DOMContentLoaded',()=>{
   }
   loadLayout();
   drawShapeCanvas();
-});
+}
+// Run on load and when shape tab is shown
+setTimeout(initShapeCanvas, 100);
+// Also re-init when shape tab clicked
+const _origShowTab = showTab;
+showTab = function(t,el){
+  _origShowTab(t,el);
+  if(t==='shape'){setTimeout(()=>{initShapeCanvas();drawShapeCanvas();},50);}
+};
 function buildLayoutGrid(){
   layoutRows=parseInt(document.getElementById('layoutrows').value)||9;
   layoutCols=parseInt(document.getElementById('layoutcols').value)||9;
