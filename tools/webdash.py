@@ -375,6 +375,9 @@ select{cursor:pointer;min-width:120px}
     <button class="btn btn-sm" onclick="clearFrame()">Clear Frame</button>
   </div>
   <div class="row" style="margin-top:6px">
+    <span class="label">Clone effect</span>
+    <select id="clonesrc" style="min-width:140px"><option value="">-- select --</option></select>
+    <button class="btn btn-sm btn-purple" onclick="cloneEffect()">Clone as Template</button>
     <button class="btn btn-sm btn-success" onclick="addFrame()">+ Add Frame</button>
     <button class="btn btn-sm btn-ghost" onclick="dupFrame()">Duplicate</button>
     <button class="btn btn-sm btn-danger" onclick="delFrame()">Delete Frame</button>
@@ -649,6 +652,41 @@ function addFrame(){
   updateFrameInfo();
   toast('Frame '+animFrames.length+' added');
 }
+async function cloneEffect(){
+  const name=document.getElementById('clonesrc').value;
+  if(!name){toast('Select an effect first');return;}
+  const seqs=await fetch('/api/seq/list').then(r=>r.json());
+  const seq=seqs[name];
+  if(!seq){toast('Effect not found');return;}
+  const colors=seq.colors||['#ff0000'];
+  // Generate 8 frames with colors shifted
+  animFrames=[];
+  for(let i=0;i<8;i++){
+    const frame=new Array(81).fill(colors[i%colors.length]);
+    animFrames.push(frame);
+  }
+  currentFrame=0;
+  ledColors=[...animFrames[0]];
+  renderAnimGrid();
+  renderTimeline();
+  renderPreview();
+  updateFrameInfo();
+  document.getElementById('animname').value=name+'_custom';
+  document.getElementById('framedelay').value=150;
+  toast('Cloned '+name+' (8 frames). Edit and save.');
+}
+function populateCloneSrc(){
+  fetch('/api/seq/list').then(r=>r.json()).then(data=>{
+    const sel=document.getElementById('clonesrc');
+    if(!sel) return;
+    sel.innerHTML='<option value="">-- select effect --</option>';
+    Object.keys(data).forEach(n=>{
+      const o=document.createElement('option');
+      o.value=n; o.textContent=n;
+      sel.appendChild(o);
+    });
+  });
+}
 function dupFrame(){
   if(!animFrames.length) return;
   animFrames.splice(currentFrame+1,0,[...animFrames[currentFrame]]);
@@ -759,7 +797,7 @@ const grid=document.getElementById('ledgrid');
 for(let i=0;i<81;i++){const d=document.createElement('div');d.className='led-cell';d.title='LED '+i;d.onclick=()=>{document.getElementById('pixi').value=i;};grid.appendChild(d);}
 // Anim grid
 renderAnimGrid();
-loadSeqs(); loadAnimList(); refreshState(); updateFrameInfo();
+loadSeqs(); loadAnimList(); refreshState(); updateFrameInfo(); populateCloneSrc();
 // Shape Bender state
 let shapeGrid={};
 let shapeRows=32, shapeCols=32;
