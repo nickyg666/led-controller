@@ -354,6 +354,21 @@ select{cursor:pointer;min-width:120px}
   <div class="row">
     <span class="label">Paint color</span>
     <input type="color" id="animcolor" value="#ff0000">
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#ff0000';paintColor='#ff0000'">Red</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#00ff00';paintColor='#00ff00'">Green</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#0000ff';paintColor='#0000ff'">Blue</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#ffffff';paintColor='#ffffff'">White</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#ffff00';paintColor='#ffff00'">Yellow</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#ff00ff';paintColor='#ff00ff'">Magenta</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#00ffff';paintColor='#00ffff'">Cyan</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('animcolor').value='#ff8000';paintColor='#ff8000'">Orange</button>
+  </div>
+  <div class="row">
+    <span class="label">Palette</span>
+    <div id="animpalette" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+    <button class="btn btn-sm btn-ghost" onclick="addToAnimPalette()">+ Add Current</button>
+  </div>
+  <div class="row">
     <span class="label">Brush</span>
     <select id="brushsize"><option value="1">1 LED</option><option value="2">2 LEDs</option><option value="3">3 LEDs</option><option value="5">5 LEDs</option></select>
     <button class="btn btn-sm" onclick="fillFrame()">Fill Frame</button>
@@ -495,6 +510,10 @@ const defaultPalette=['#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff
 let paletteColors=[...defaultPalette];
 function renderPalette(){const el=document.getElementById('palette');if(!el)return;el.innerHTML='';paletteColors.forEach(c=>{const d=document.createElement('div');d.style.cssText='width:24px;height:24px;border-radius:4px;cursor:pointer;border:2px solid #333;background:'+c;d.title=c;d.onclick=()=>{document.getElementById('seqcolor').value=c;document.getElementById('color').value=c;document.getElementById('animcolor').value=c;document.getElementById('pixcolor').value=c;paintColor=c;};el.appendChild(d);});}
 function addToPalette(){const c=document.getElementById('seqcolor').value;if(!paletteColors.includes(c)){paletteColors.push(c);renderPalette();toast('Added '+c);}}
+let animPaletteColors=[...defaultPalette];
+function renderAnimPalette(){const el=document.getElementById('animpalette');if(!el)return;el.innerHTML='';animPaletteColors.forEach(c=>{const d=document.createElement('div');d.style.cssText='width:24px;height:24px;border-radius:4px;cursor:pointer;border:2px solid #333;background:'+c;d.title=c;d.onclick=()=>{document.getElementById('animcolor').value=c;paintColor=c;toast('Color: '+c);};el.appendChild(d);});}
+function addToAnimPalette(){const c=document.getElementById('animcolor').value;if(!animPaletteColors.includes(c)){animPaletteColors.push(c);renderAnimPalette();toast('Added '+c);}}
+renderAnimPalette();
 function addSeqColor(){seqColors.push(document.getElementById('seqcolor').value);renderSeq();}
 renderPalette();
 function clearSeq(){seqColors=[];renderSeq();}
@@ -563,6 +582,8 @@ function updateFrameInfo(){
 document.addEventListener('DOMContentLoaded',()=>{
   const pc=document.getElementById('animcolor');
   if(pc) pc.addEventListener('input',e=>{paintColor=e.target.value;});
+  const cc=document.getElementById('color');
+  if(cc) cc.addEventListener('input',e=>{document.getElementById('seqcolor').value=e.target.value;});
 });
 
 function renderTimeline(){
