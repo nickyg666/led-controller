@@ -274,7 +274,7 @@ select{cursor:pointer;min-width:120px}
   <button class="tab active" onclick="showTab('control',this)">Control</button>
   <button class="tab" onclick="showTab('sequence',this)">Sequences</button>
   <button class="tab" onclick="showTab('animation',this)">Animation Editor</button>
-  <button class="tab" onclick="showTab('layout',this)">Layout</button>
+  <button class="tab" onclick="showTab('shape',this)">Shape Bender</button>
   <button class="tab" onclick="showTab('leds',this)">Per-LED</button>
   <button class="tab" onclick="showTab('effects',this)">Effects</button>
 </div>
@@ -333,6 +333,11 @@ select{cursor:pointer;min-width:120px}
     <button class="btn btn-sm btn-danger" onclick="clearSeq()">Clear</button>
     <button class="btn btn-sm btn-success" onclick="runSeq()">Run</button>
     <button class="btn btn-sm btn-ghost" onclick="stopSeq()">Stop</button>
+  </div>
+  <div class="row" style="margin-bottom:8px">
+    <span class="label">Palette</span>
+    <div id="palette" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+    <button class="btn btn-sm btn-ghost" onclick="addToPalette()">+ Add Current</button>
   </div>
   <div class="seq-builder" id="seqbuilder"></div>
   <div class="row" style="margin-top:10px">
@@ -396,8 +401,8 @@ select{cursor:pointer;min-width:120px}
 </div>
 </div>
 
-<!-- Layout Editor -->
-<div id="tab-layout" style="display:none">
+<!-- Shape Bender -->
+<div id="tab-shape" style="display:none">
 <div class="card">
   <h2>Grid Layout Editor</h2>
   <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Reconfigure the LED grid to match your physical strip layout (bends, curves, etc.). Click a cell to assign an LED index.</p>
@@ -417,7 +422,15 @@ select{cursor:pointer;min-width:120px}
     <button class="btn btn-sm btn-ghost" onclick="autoFill()">Auto-fill sequential</button>
     <button class="btn btn-sm btn-danger" onclick="clearLayout()">Clear</button>
   </div>
-  <div id="layoutgrid" style="display:grid;gap:2px;margin:12px 0;overflow:auto;max-height:500px"></div>
+  <canvas id="shapeCanvas" width="640" height="640" style="background:#0a0a0f;border:1px solid var(--border);border-radius:10px;cursor:crosshair;max-width:100%"></canvas>
+  <div class="row" style="margin-top:8px">
+    <span class="label">Zoom</span>
+    <input type="range" id="shapezoom" min="10" max="40" value="20" oninput="shapeZoom=parseInt(this.value);drawShapeCanvas();document.getElementById('zoomval').textContent=this.value+'px'">
+    <span id="zoomval">20px</span>
+    <button class="btn btn-sm btn-ghost" onclick="shapeMode='place';toast('Click to place next LED')">Place Mode</button>
+    <button class="btn btn-sm btn-ghost" onclick="shapeMode='move';toast('Drag to move LEDs')">Move Mode</button>
+    <button class="btn btn-sm btn-ghost" onclick="shapeMode='erase';toast('Click to erase')">Erase Mode</button>
+  </div>
   <div class="status-bar" id="layoutstatus">No layout loaded. Build a grid to start.</div>
 </div>
 </div>
@@ -488,9 +501,14 @@ function log(msg){const l=document.getElementById('log');l.innerHTML+=msg+'<br>'
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 function cmd(c){fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:c})}).then(r=>r.text()).then(t=>log('> '+c+' => '+t.trim()));}
 function applyColor(){const hex=document.getElementById('color').value;const r=parseInt(hex.slice(1,3),16);const g=parseInt(hex.slice(3,5),16);const b=parseInt(hex.slice(5,7),16);cmd('RGB '+r+' '+g+' '+b);}
+const defaultPalette=['#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff','#ffffff','#000000','#ff8000','#8000ff','#0080ff','#ff0080'];
+let paletteColors=[...defaultPalette];
+function renderPalette(){const el=document.getElementById('palette');if(!el)return;el.innerHTML='';paletteColors.forEach(c=>{const d=document.createElement('div');d.style.cssText='width:24px;height:24px;border-radius:4px;cursor:pointer;border:2px solid #333;background:'+c;d.title=c;d.onclick=()=>{document.getElementById('seqcolor').value=c;document.getElementById('color').value=c;document.getElementById('animcolor').value=c;document.getElementById('pixcolor').value=c;paintColor=c;};el.appendChild(d);});}
+function addToPalette(){const c=document.getElementById('seqcolor').value;if(!paletteColors.includes(c)){paletteColors.push(c);renderPalette();toast('Added '+c);}}
 function addSeqColor(){seqColors.push(document.getElementById('seqcolor').value);renderSeq();}
+renderPalette();
 function clearSeq(){seqColors=[];renderSeq();}
-function renderSeq(){const el=document.getElementById('seqbuilder');el.innerHTML='';if(!seqColors.length){el.innerHTML='<span class="seq-empty">Click "Add Color" to build a sequence</span>';return;}seqColors.forEach((c,i)=>{const d=document.createElement('div');d.className='seq-item';d.style.background=c;d.title=c+' (click to remove)';d.onclick=()=>{seqColors.splice(i,1);renderSeq();};const x=document.createElement('div');x.className='del';x.textContent='×';d.appendChild(x);el.appendChild(d);});}
+function renderSeq(){const el=document.getElementById('seqbuilder');el.innerHTML='';if(!seqColors.length){el.innerHTML='<span class="seq-empty">Click "Add Color" to build a sequence</span>';return;}seqColors.forEach((c,i)=>{const d=document.createElement('div');    d.className='seq-item';d.style.background=c;d.title=c+' (click to remove, dblclick to toggle)';d.onclick=()=>{seqColors.splice(i,1);renderSeq();};d.ondblclick=(e)=>{e.stopPropagation();const picker=document.getElementById('seqcolor');if(picker.value.toLowerCase()===c.toLowerCase()){seqColors.splice(i,1);toast('Removed '+c);}else{seqColors[i]=picker.value;toast('Changed to '+picker.value);}renderSeq();};const x=document.createElement('div');x.className='del';x.textContent='×';d.appendChild(x);el.appendChild(d);});}
 async function runSeq(){if(!seqColors.length){toast('Add colors first');return;}for(let i=0;i<seqColors.length;i++){const hex=seqColors[i];const r=parseInt(hex.slice(1,3),16);const g=parseInt(hex.slice(3,5),16);const b=parseInt(hex.slice(5,7),16);await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'RGB '+r+' '+g+' '+b})});await new Promise(res=>setTimeout(res,parseInt(document.getElementById('seqdelay').value)||300));}toast('Sequence done');}
 function stopSeq(){cmd('OFF');}
 function saveSeq(){const name=document.getElementById('seqname').value.trim();if(!name||!seqColors.length){toast('Name and colors required');return;}fetch('/api/seq/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,colors:seqColors,delay:parseInt(document.getElementById('seqdelay').value)||300})}).then(r=>r.text()).then(t=>{toast(t);loadSeqs();});}
@@ -604,9 +622,16 @@ function loadFrame(i){
   updateFrameInfo();
 }
 function addFrame(){
-  const frame=[...ledColors];
+  // Save current frame first
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  // Create new frame as copy of current (or blank if no frames)
+  const frame = animFrames.length>0 ? [...ledColors] : new Array(81).fill('#000000');
   animFrames.push(frame);
   currentFrame=animFrames.length-1;
+  ledColors=[...animFrames[currentFrame]];
+  renderAnimGrid();
   renderTimeline();
   renderPreview();
   updateFrameInfo();
@@ -673,6 +698,7 @@ function playAnim(){
 function stopAnim(){
   if(animInterval){clearInterval(animInterval);animInterval=null;}
   animPlaying=false;
+  cmd('CLEAR');
   toast('Stopped');
 }
 async function saveAnim(){
@@ -722,9 +748,287 @@ for(let i=0;i<81;i++){const d=document.createElement('div');d.className='led-cel
 // Anim grid
 renderAnimGrid();
 loadSeqs(); loadAnimList(); refreshState(); updateFrameInfo();
-// Layout editor state
-let layoutGrid=[];
-let layoutRows=9, layoutCols=9;
+// Shape Bender state
+let shapeGrid={};
+let shapeRows=32, shapeCols=32;
+let shapeZoom=20;
+let shapeMode='place';
+let shapeNextIdx=0;
+let shapeDragging=null;
+let shapeDragOffset={x:0,y:0};
+
+function buildLayoutGrid(){
+  shapeRows=parseInt(document.getElementById('layoutrows').value)||16;
+  shapeCols=parseInt(document.getElementById('layoutcols').value)||16;
+  shapeGrid={};
+  shapeNextIdx=0;
+  drawShapeCanvas();
+  document.getElementById('layoutstatus').textContent='Grid '+shapeRows+'x'+shapeCols+'. Click to place LEDs in order.';
+}
+
+function drawShapeCanvas(){
+  const canvas=document.getElementById('shapeCanvas');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const cellSize=shapeZoom;
+  const w=shapeCols*cellSize;
+  const h=shapeRows*cellSize;
+  canvas.width=w;
+  canvas.height=h;
+  ctx.fillStyle='#0a0a0f';
+  ctx.fillRect(0,0,w,h);
+  // Grid lines
+  ctx.strokeStyle='#1a1a28';
+  ctx.lineWidth=1;
+  for(let r=0;r<=shapeRows;r++){
+    ctx.beginPath();ctx.moveTo(0,r*cellSize);ctx.lineTo(w,r*cellSize);ctx.stroke();
+  }
+  for(let c=0;c<=shapeCols;c++){
+    ctx.beginPath();ctx.moveTo(c*cellSize,0);ctx.lineTo(c*cellSize,h);ctx.stroke();
+  }
+  // Draw path lines
+  const sorted=Object.entries(shapeGrid).sort((a,b)=>parseInt(a[1])-parseInt(b[1]));
+  if(sorted.length>1){
+    ctx.strokeStyle='rgba(99,102,241,0.4)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    for(let i=0;i<sorted.length;i++){
+      const [key,idx]=sorted[i];
+      const [r,c]=key.split(',').map(Number);
+      const x=c*cellSize+cellSize/2;
+      const y=r*cellSize+cellSize/2;
+      if(i===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  // Draw LEDs
+  for(const [key,idx] of Object.entries(shapeGrid)){
+    const [r,c]=key.split(',').map(Number);
+    const x=c*cellSize;
+    const y=r*cellSize;
+    const hue=(parseInt(idx)/Math.max(1,Object.keys(shapeGrid).length))*360;
+    ctx.fillStyle='hsl('+hue+',80%,55%)';
+    ctx.fillRect(x+1,y+1,cellSize-2,cellSize-2);
+    ctx.fillStyle='#fff';
+    ctx.font='bold '+(Math.max(8,cellSize/3))+'px sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(idx, x+cellSize/2, y+cellSize/2);
+  }
+  // Update status
+  const count=Object.keys(shapeGrid).length;
+  document.getElementById('layoutstatus').textContent=count+' LEDs placed. Next: LED '+shapeNextIdx+'. Mode: '+shapeMode;
+}
+
+function shapeCanvasClick(e){
+  const canvas=document.getElementById('shapeCanvas');
+  const rect=canvas.getBoundingClientRect();
+  const scaleX=canvas.width/rect.width;
+  const scaleY=canvas.height/rect.height;
+  const x=(e.clientX-rect.left)*scaleX;
+  const y=(e.clientY-rect.top)*scaleY;
+  const cellSize=shapeZoom;
+  const c=Math.floor(x/cellSize);
+  const r=Math.floor(y/cellSize);
+  if(r<0||r>=shapeRows||c<0||c>=shapeCols) return;
+  const key=r+','+c;
+  if(shapeMode==='place'){
+    if(shapeGrid[key]===undefined){
+      shapeGrid[key]=shapeNextIdx;
+      shapeNextIdx++;
+      drawShapeCanvas();
+    }
+  } else if(shapeMode==='erase'){
+    if(shapeGrid[key]!==undefined){
+      delete shapeGrid[key];
+      // renumber
+      renumberShape();
+      drawShapeCanvas();
+    }
+  }
+}
+
+function renumberShape(){
+  const sorted=Object.entries(shapeGrid).sort((a,b)=>a[1]-b[1]);
+  shapeGrid={};
+  sorted.forEach(([key],i)=>{shapeGrid[key]=i;});
+  shapeNextIdx=sorted.length;
+}
+
+function presetLinear(){
+  shapeGrid={};
+  let idx=0;
+  for(let r=0;r<shapeRows && idx<NUM_LEDS;r++){
+    for(let c=0;c<shapeCols && idx<NUM_LEDS;c++){
+      if(r===0||c===0||r===shapeRows-1||c===shapeCols-1){
+        shapeGrid[r+','+c]=idx++;
+      }
+    }
+  }
+  shapeNextIdx=idx;
+  drawShapeCanvas();
+  toast('Linear border applied');
+}
+
+function presetSerpentine(){
+  shapeGrid={};
+  let idx=0;
+  for(let r=0;r<shapeRows && idx<NUM_LEDS;r++){
+    const cols = (r%2===0) ? [...Array(shapeCols).keys()] : [...Array(shapeCols).keys()].reverse();
+    for(const c of cols){
+      if(idx<NUM_LEDS) shapeGrid[r+','+c]=idx++;
+    }
+  }
+  shapeNextIdx=idx;
+  drawShapeCanvas();
+  toast('Serpentine applied');
+}
+
+function presetSpiral(){
+  shapeGrid={};
+  let idx=0;
+  let top=0,bottom=shapeRows-1,left=0,right=shapeCols-1;
+  while(top<=bottom && left<=right && idx<NUM_LEDS){
+    for(let c=left;c<=right && idx<NUM_LEDS;c++) shapeGrid[top+','+c]=idx++;
+    top++;
+    for(let r=top;r<=bottom && idx<NUM_LEDS;r++) shapeGrid[r+','+right]=idx++;
+    right--;
+    if(top<=bottom){for(let c=right;c>=left && idx<NUM_LEDS;c--) shapeGrid[bottom+','+c]=idx++;bottom--;}
+    if(left<=right){for(let r=bottom;r>=top && idx<NUM_LEDS;r--) shapeGrid[r+','+left]=idx++;left++;}
+  }
+  shapeNextIdx=idx;
+  drawShapeCanvas();
+  toast('Spiral applied');
+}
+
+function presetArch(){
+  shapeGrid={};
+  let idx=0;
+  // Left column down
+  for(let r=shapeRows-1;r>=0 && idx<NUM_LEDS;r--){shapeGrid[r+',0']=idx++;}
+  // Bottom row right
+  for(let c=1;c<shapeCols && idx<NUM_LEDS;c++){shapeGrid[(shapeRows-1)+','+c]=idx++;}
+  // Right column up
+  for(let r=shapeRows-2;r>=0 && idx<NUM_LEDS;r--){shapeGrid[r+','+(shapeCols-1)]=idx++;}
+  // Top row left
+  for(let c=shapeCols-2;c>=1 && idx<NUM_LEDS;c--){shapeGrid['0,'+c]=idx++;}
+  shapeNextIdx=idx;
+  drawShapeCanvas();
+  toast('Arch applied');
+}
+
+function clearLayout(){
+  shapeGrid={};
+  shapeNextIdx=0;
+  drawShapeCanvas();
+  toast('Layout cleared');
+}
+
+function autoFill(){
+  shapeGrid={};
+  let idx=0;
+  for(let r=0;r<shapeRows;r++){
+    for(let c=0;c<shapeCols;c++){
+      if(idx<NUM_LEDS) shapeGrid[r+','+c]=idx++;
+    }
+  }
+  shapeNextIdx=idx;
+  drawShapeCanvas();
+  toast('Auto-filled '+idx+' LEDs');
+}
+
+function saveLayout(){
+  const data={rows:shapeRows,cols:shapeCols,grid:shapeGrid};
+  localStorage.setItem('ledLayout',JSON.stringify(data));
+  toast('Layout saved ('+Object.keys(shapeGrid).length+' LEDs)');
+}
+
+function loadLayout(){
+  const saved=localStorage.getItem('ledLayout');
+  if(saved){
+    const d=JSON.parse(saved);
+    shapeRows=d.rows; shapeCols=d.cols;
+    shapeGrid=d.grid;
+    shapeNextIdx=Object.keys(shapeGrid).length;
+    document.getElementById('layoutrows').value=shapeRows;
+    document.getElementById('layoutcols').value=shapeCols;
+    drawShapeCanvas();
+  }
+}
+
+function getLayoutOrder(){
+  // Returns array of LED indices in placement order (for animation editor)
+  const sorted=Object.entries(shapeGrid).sort((a,b)=>a[1]-b[1]);
+  return sorted.map(([k,v])=>v);
+}
+
+// Override renderAnimGrid to use shape layout
+const _origRenderAnimGrid2=renderAnimGrid;
+function renderAnimGridLayout(){
+  const grid=document.getElementById('animgrid');
+  if(!grid) return;
+  if(!Object.keys(shapeGrid).length){
+    _origRenderAnimGrid2();
+    return;
+  }
+  grid.innerHTML='';
+  grid.style.gridTemplateColumns='repeat('+shapeCols+',1fr)';
+  grid.style.display='grid';
+  grid.style.gap='2px';
+  for(let r=0;r<shapeRows;r++){
+    for(let c=0;c<shapeCols;c++){
+      const key=r+','+c;
+      const ledIdx=shapeGrid[key];
+      const d=document.createElement('div');
+      d.className='led-cell';
+      d.style.aspectRatio='1';
+      d.style.display='flex';
+      d.style.alignItems='center';
+      d.style.justifyContent='center';
+      d.style.fontSize='8px';
+      d.style.fontWeight='600';
+      d.style.cursor='pointer';
+      if(ledIdx===undefined){
+        d.style.background='#0a0a0f';
+        d.style.opacity='0.2';
+      } else {
+        d.style.background=ledColors[ledIdx]||'#1a1a28';
+        d.style.color='#fff';
+        d.textContent=ledIdx;
+        d.onmousedown=()=>{isPainting=true;paintLedLayout(ledIdx);};
+        d.onmouseenter=()=>{if(isPainting)paintLedLayout(ledIdx);};
+        d.onmouseup=()=>{isPainting=false;};
+      }
+      grid.appendChild(d);
+    }
+  }
+  document.onmouseup=()=>{isPainting=false;};
+}
+function paintLedLayout(ledIdx){
+  if(ledIdx===undefined||ledIdx<0) return;
+  const bs=parseInt(document.getElementById('brushsize').value);
+  for(let d=0;d<bs;d++){
+    if(ledIdx+d<81){ledColors[ledIdx+d]=paintColor;}
+  }
+  if(animFrames.length>0 && currentFrame>=0 && currentFrame<animFrames.length){
+    animFrames[currentFrame]=[...ledColors];
+  }
+  renderAnimGridLayout();
+}
+// Replace renderAnimGrid
+renderAnimGrid=renderAnimGridLayout;
+
+// Canvas click handler
+document.addEventListener('DOMContentLoaded',()=>{
+  const canvas=document.getElementById('shapeCanvas');
+  if(canvas){
+    canvas.addEventListener('click',shapeCanvasClick);
+    canvas.addEventListener('contextmenu',e=>{e.preventDefault();const rect=canvas.getBoundingClientRect();const x=(e.clientX-rect.left)*(canvas.width/rect.width);const y=(e.clientY-rect.top)*(canvas.height/rect.height);const c=Math.floor(x/shapeZoom);const r=Math.floor(y/shapeZoom);const key=r+','+c;if(shapeGrid[key]!==undefined){delete shapeGrid[key];renumberShape();drawShapeCanvas();toast('Removed LED');}});
+  }
+  loadLayout();
+  drawShapeCanvas();
+});
 function buildLayoutGrid(){
   layoutRows=parseInt(document.getElementById('layoutrows').value)||9;
   layoutCols=parseInt(document.getElementById('layoutcols').value)||9;
