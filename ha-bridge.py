@@ -23,6 +23,9 @@ EFFECTS = ["static","breath","rainbow","strobe","candle","wave","police","random
            "aurora","lava","matrix","k2000","heartbeat","colorcycle","twinkle",
            "sparklewave","stroberainbow","gradient","demo"]
 
+SPEED_TOPIC = "rp2040_speed"
+SPEED_PREFIX = "homeassistant/light/" + SPEED_TOPIC
+
 ser_fd = None
 
 
@@ -33,53 +36,58 @@ def find_device():
     return ds[0] if ds else None
 
 
+SERIAL_DEV = None
+
+
 def open_serial(dev):
-    global ser_fd
-    ser_fd = os.open(dev, os.O_RDWR | os.O_NOCTTY)
-    attrs = termios.tcgetattr(ser_fd)
-    attrs[1] = termios.OPOST | termios.ONLCR
-    attrs[3] = termios.CREAD | termios.CLOCAL
-    attrs[6][termios.VMIN] = 0
-    attrs[6][termios.VTIME] = 1
-    termios.tcsetattr(ser_fd, termios.TCSANOW, attrs)
-    time.sleep(0.5)
-    while True:
-        r, _, _ = select.select([ser_fd], [], [], 0.2)
-        if not r:
-            break
-        os.read(ser_fd, 4096)
+    global SERIAL_DEV
+    SERIAL_DEV = dev
 
 
 def send_serial(cmd):
-    if ser_fd is None:
+    global SERIAL_DEV
+    if SERIAL_DEV is None:
+        SERIAL_DEV = find_device() if 'find_device' in globals() else None
+    if not SERIAL_DEV:
+        # try to find
+        import glob, os as _os
+        if _os.path.exists("/dev/rp2040-rgb"):
+            SERIAL_DEV = "/dev/rp2040-rgb"
+        else:
+            ds = sorted(glob.glob("/dev/ttyACM*"))
+            SERIAL_DEV = ds[0] if ds else None
+    if not SERIAL_DEV:
+        print("no serial device", flush=True)
         return
     try:
-        os.write(ser_fd, (cmd + "\r\n").encode())
+        fd = os.open(SERIAL_DEV, os.O_RDWR | os.O_NOCTTY)
     except OSError as e:
-        print(f"write err: {e}", flush=True)
+        print(f"open err: {e}", flush=True)
         return
-    time.sleep(0.05)
-    resp = b""
-    while True:
+    try:
+        attrs = termios.tcgetattr(fd)
+        attrs[1] = termios.OPOST | termios.ONLCR
+        attrs[3] = termios.CREAD | termios.CLOCAL
+        attrs[6][termios.VMIN] = 0
+        attrs[6][termios.VTIME] = 1
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        # flush
+        while True:
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if not r:
+                break
+            os.read(fd, 4096)
+        os.write(fd, (cmd + "\r\n").encode())
+        time.sleep(0.1)
+    except OSError as e:
+        print(f"serial err: {e}", flush=True)
+    finally:
         try:
-            r, _, _ = select.select([ser_fd], [], [], 0.2)
-        except Exception as e:
-            print(f"select err: {e}", flush=True)
-            break
-        if not r:
-            break
-        try:
-            n = os.read(ser_fd, 4096)
-        except OSError as e:
-            print(f"read err: {e}", flush=True)
-            break
-        if len(n) <= 0:
-            break
-        resp += n
-    if resp:
-        print(f"  serial resp to '{cmd}': {resp.decode(errors='replace').strip()}", flush=True)
+            os.close(fd)
+        except Exception:
+            pass
 
-state = {"state": "OFF", "brightness": 255, "color": {"r": 255, "g": 0, "b": 0}, "base_color": {"r": 255, "g": 0, "b": 0}, "effect": "static"}
+state = {"state": "OFF", "brightness": 255, "color": {"r": 255, "g": 0, "b": 0}, "base_color": {"r": 255, "g": 0, "b": 0}, "effect": "static", "speed": 10}
 
 
 def publish_state(client):
@@ -91,6 +99,15 @@ def publish_state(client):
         "effect": state["effect"],
     }
     client.publish(f"{TOPIC}/state", json.dumps(payload), retain=True)
+
+
+def publish_speed_state(client):
+    # brightness maps to speed: 1-255 -> 1-255
+    payload = {
+        "state": state["state"],
+        "brightness": state["speed"] if "speed" in state else 10,
+    }
+    client.publish(f"{SPEED_TOPIC}/state", json.dumps(payload), retain=True)
 
 
 def on_message(client, userdata, msg):
@@ -138,13 +155,30 @@ def on_message(client, userdata, msg):
                     send_serial(f"BRIGHTNESS {state['brightness']}")
                     sc = state["base_color"]
                     send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
-        publish_state(client)
+            publish_state(client)
+        elif msg.topic == f"{SPEED_TOPIC}/set":
+            if isinstance(data, dict):
+                if "state" in data:
+                    state["state"] = data["state"]
+                if "brightness" in data:
+                    spd = max(1, min(255, data["brightness"]))
+                    state["speed"] = spd
+                    send_serial(f"SPEED {spd}")
+            elif isinstance(data, str):
+                if data == "ON":
+                    state["state"] = "ON"
+                    send_serial(f"SPEED {state['speed']}")
+                elif data == "OFF":
+                    state["state"] = "OFF"
+                    send_serial("OFF")
+            publish_speed_state(client)
     except Exception as e:
         print(f"ERR in handler: {e}", flush=True)
         traceback.print_exc()
 
 
 def on_connect(client, userdata, flags, rc, props=None):
+    # Main light entity
     disc = {
         "name": "PC lights",
         "unique_id": "pc_lights_v2",
@@ -160,7 +194,36 @@ def on_connect(client, userdata, flags, rc, props=None):
     }
     client.publish(f"{PREFIX}/config", json.dumps(disc), retain=True)
     client.subscribe(f"{TOPIC}/set")
+
+    # Speed control entity (brightness maps to animation speed 1-255)
+    speed_disc = {
+        "name": "PC lights Speed",
+        "unique_id": "pc_lights_speed",
+        "command_topic": f"{SPEED_TOPIC}/set",
+        "state_topic": f"{SPEED_TOPIC}/state",
+        "brightness": True,
+        "brightness_scale": 255,
+        "color_mode": "brightness",
+        "supported_color_modes": ["brightness"],
+        "device": {
+            "identifiers": ["pc_lights"],
+            "name": "PC lights",
+            "model": "RP2040 WS2811",
+            "manufacturer": "DIY",
+        },
+    }
+    client.publish(f"{SPEED_PREFIX}/config", json.dumps(speed_disc), retain=True)
+    client.subscribe(f"{SPEED_TOPIC}/set")
+
     publish_state(client)
+    publish_speed_state(client)
+
+
+def find_device():
+    if os.path.exists("/dev/rp2040-rgb"):
+        return "/dev/rp2040-rgb"
+    ds = sorted(glob.glob("/dev/ttyACM*"))
+    return ds[0] if ds else None
 
 
 def main():

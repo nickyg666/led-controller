@@ -23,6 +23,9 @@ EFFECTS = ["static","breath","rainbow","strobe","candle","wave","police","random
            "aurora","lava","matrix","k2000","heartbeat","colorcycle","twinkle",
            "sparklewave","stroberainbow","gradient","demo"]
 
+SPEED_TOPIC = "rp2040_speed"
+SPEED_PREFIX = "homeassistant/light/" + SPEED_TOPIC
+
 ser_fd = None
 
 
@@ -84,7 +87,7 @@ def send_serial(cmd):
         except Exception:
             pass
 
-state = {"state": "OFF", "brightness": 255, "color": {"r": 255, "g": 0, "b": 0}, "base_color": {"r": 255, "g": 0, "b": 0}, "effect": "static"}
+state = {"state": "OFF", "brightness": 255, "color": {"r": 255, "g": 0, "b": 0}, "base_color": {"r": 255, "g": 0, "b": 0}, "effect": "static", "speed": 10}
 
 
 def publish_state(client):
@@ -96,6 +99,15 @@ def publish_state(client):
         "effect": state["effect"],
     }
     client.publish(f"{TOPIC}/state", json.dumps(payload), retain=True)
+
+
+def publish_speed_state(client):
+    # brightness maps to speed: 1-255 -> 1-255
+    payload = {
+        "state": state["state"],
+        "brightness": state["speed"] if "speed" in state else 10,
+    }
+    client.publish(f"{SPEED_TOPIC}/state", json.dumps(payload), retain=True)
 
 
 def on_message(client, userdata, msg):
@@ -143,13 +155,30 @@ def on_message(client, userdata, msg):
                     send_serial(f"BRIGHTNESS {state['brightness']}")
                     sc = state["base_color"]
                     send_serial(f"RGB {sc['r']} {sc['g']} {sc['b']}")
-        publish_state(client)
+            publish_state(client)
+        elif msg.topic == f"{SPEED_TOPIC}/set":
+            if isinstance(data, dict):
+                if "state" in data:
+                    state["state"] = data["state"]
+                if "brightness" in data:
+                    spd = max(1, min(255, data["brightness"]))
+                    state["speed"] = spd
+                    send_serial(f"SPEED {spd}")
+            elif isinstance(data, str):
+                if data == "ON":
+                    state["state"] = "ON"
+                    send_serial(f"SPEED {state['speed']}")
+                elif data == "OFF":
+                    state["state"] = "OFF"
+                    send_serial("OFF")
+            publish_speed_state(client)
     except Exception as e:
         print(f"ERR in handler: {e}", flush=True)
         traceback.print_exc()
 
 
 def on_connect(client, userdata, flags, rc, props=None):
+    # Main light entity
     disc = {
         "name": "PC lights",
         "unique_id": "pc_lights_v2",
@@ -165,7 +194,29 @@ def on_connect(client, userdata, flags, rc, props=None):
     }
     client.publish(f"{PREFIX}/config", json.dumps(disc), retain=True)
     client.subscribe(f"{TOPIC}/set")
+
+    # Speed control entity (brightness maps to animation speed 1-255)
+    speed_disc = {
+        "name": "PC lights Speed",
+        "unique_id": "pc_lights_speed",
+        "command_topic": f"{SPEED_TOPIC}/set",
+        "state_topic": f"{SPEED_TOPIC}/state",
+        "brightness": True,
+        "brightness_scale": 255,
+        "color_mode": "brightness",
+        "supported_color_modes": ["brightness"],
+        "device": {
+            "identifiers": ["pc_lights"],
+            "name": "PC lights",
+            "model": "RP2040 WS2811",
+            "manufacturer": "DIY",
+        },
+    }
+    client.publish(f"{SPEED_PREFIX}/config", json.dumps(speed_disc), retain=True)
+    client.subscribe(f"{SPEED_TOPIC}/set")
+
     publish_state(client)
+    publish_speed_state(client)
 
 
 def find_device():
